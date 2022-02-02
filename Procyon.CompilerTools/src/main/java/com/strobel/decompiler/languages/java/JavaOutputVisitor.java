@@ -1835,7 +1835,7 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
 
             openBrace(braceStyle);
 
-            writeMembers(members);
+            writeMembers(members, isTrulyAnonymous);
 
             closeBrace(braceStyle);
 
@@ -1851,12 +1851,15 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
             this.currentType = previousType;
         }
     }
-
     private void writeMembers(final AstNodeCollection<EntityDeclaration> members) {
+        this.writeMembers(members, true);
+    }
+    private void writeMembers(final AstNodeCollection<EntityDeclaration> members, boolean isTrulyAnonymous) {
         boolean first = true;
         EntityDeclaration lastMember = null;
 
         for (final EntityDeclaration member : members) {
+
             if (isTrulyAnonymous && member.getEntityType() == EntityType.CONSTRUCTOR) {
                 continue;
             }
