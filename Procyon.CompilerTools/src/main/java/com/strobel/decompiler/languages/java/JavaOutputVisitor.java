@@ -31,6 +31,7 @@ import com.strobel.decompiler.ITextOutput;
 import com.strobel.decompiler.languages.BytecodeLanguage;
 import com.strobel.decompiler.languages.LineNumberPosition;
 import com.strobel.decompiler.languages.TextLocation;
+import com.strobel.decompiler.languages.EntityType;
 import com.strobel.decompiler.languages.java.TextOutputFormatter.LineNumberMode;
 import com.strobel.decompiler.languages.java.ast.*;
 import com.strobel.decompiler.languages.java.ast.UnionType;
@@ -1856,6 +1857,9 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
         EntityDeclaration lastMember = null;
 
         for (final EntityDeclaration member : members) {
+            if (isTrulyAnonymous && member.getEntityType() == EntityType.CONSTRUCTOR) {
+                continue;
+            }
             if (first) {
                 first = false;
             }
