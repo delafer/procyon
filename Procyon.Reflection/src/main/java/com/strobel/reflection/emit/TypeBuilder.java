@@ -34,6 +34,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.annotation.Annotation;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.security.ProtectionDomain;
@@ -44,6 +47,10 @@ import java.util.*;
  */
 @SuppressWarnings({ "unchecked", "PackageVisibleField" })
 public final class TypeBuilder<T> extends Type<T> {
+    public static MethodHandles.Lookup defaultPackageAccess() {
+        return generated.PackageAccess.defaultPackage();
+    }
+
     private final static String DumpGeneratedClassesProperty = "com.strobel.reflection.emit.TypeBuilder.DumpGeneratedClasses";
     private final static String GeneratedClassOutputPathProperty = "com.strobel.reflection.emit.TypeBuilder.GeneratedClassOutputPath";
     private final static String VerifyGeneratedClassesProperty = "com.strobel.reflection.emit.TypeBuilder.VerifyGeneratedClasses";
@@ -79,11 +86,16 @@ public final class TypeBuilder<T> extends Type<T> {
     private ReadOnlyList<AnnotationBuilder<? extends Annotation>> _annotations;
     private Map<Class<? extends Annotation>, AnnotationBuilder<? extends Annotation>> _annotationMap;
     private final ProtectionDomain _protectionDomain;
+    private MethodHandles.Lookup _packageAccess;
 
     // <editor-fold defaultstate="collapsed" desc="Constructors and Initializers">
 
     public TypeBuilder(final String name, final int modifiers) {
-        this(name, modifiers, Types.Object, TypeList.empty());
+        this(name, modifiers, Types.Object, TypeList.empty(), (MethodHandles.Lookup)null);
+    }
+
+    public TypeBuilder(final String name, final int modifiers, final MethodHandles.Lookup packageAccess) {
+        this(name, modifiers, Types.Object, TypeList.empty(), packageAccess);
     }
 
     public TypeBuilder(
@@ -92,6 +104,16 @@ public final class TypeBuilder<T> extends Type<T> {
         final Type baseType,
         final TypeList interfaces) {
 
+        this(name, modifiers, baseType, interfaces, (MethodHandles.Lookup) null);
+    }
+
+    public TypeBuilder(
+        final String name,
+        final int modifiers,
+        final Type baseType,
+        final TypeList interfaces,
+        final MethodHandles.Lookup packageAccess) {
+
         this();
 
         initialize(
@@ -99,7 +121,8 @@ public final class TypeBuilder<T> extends Type<T> {
             modifiers,
             baseType,
             interfaces,
-            null
+            null,
+            packageAccess
         );
     }
 
@@ -123,6 +146,7 @@ public final class TypeBuilder<T> extends Type<T> {
         this();
 
         _declaringType = VerifyArgument.notNull(declaringType, "declaringType");
+        _packageAccess = declaringType._packageAccess;
 
         initializeAsGenericParameter(
             VerifyArgument.notNull(name, "name"),
@@ -135,6 +159,7 @@ public final class TypeBuilder<T> extends Type<T> {
 
         _declaringMethod = VerifyArgument.notNull(declaringMethod, "declaringMethod");
         _declaringType = _declaringMethod.getDeclaringType();
+        _packageAccess = declaringMethod.getDeclaringType()._packageAccess;
 
         initializeAsGenericParameter(
             VerifyArgument.notNull(name, "name"),
@@ -150,7 +175,8 @@ public final class TypeBuilder<T> extends Type<T> {
             modifiers,
             baseType,
             TypeList.empty(),
-            declaringType
+            declaringType,
+            declaringType._packageAccess
         );
     }
 
@@ -161,6 +187,22 @@ public final class TypeBuilder<T> extends Type<T> {
         final TypeList interfaces,
         final TypeBuilder declaringType) {
 
+        this(name,
+             modifiers,
+             baseType,
+             interfaces,
+             declaringType,
+             declaringType._packageAccess);
+    }
+
+    TypeBuilder(
+        final String name,
+        final int modifiers,
+        final Type<? super T> baseType,
+        final TypeList interfaces,
+        final TypeBuilder declaringType,
+        final MethodHandles.Lookup packageAccess) {
+
         this();
 
         initialize(
@@ -168,7 +210,8 @@ public final class TypeBuilder<T> extends Type<T> {
             modifiers,
             baseType,
             interfaces,
-            declaringType
+            declaringType,
+            packageAccess
         );
     }
 
@@ -183,35 +226,42 @@ public final class TypeBuilder<T> extends Type<T> {
     }
 
     private void initialize(
-        final String fullName,
+        final String typeName,
         final int modifiers,
         final Type baseType,
         final TypeList interfaces,
-        final TypeBuilder declaringType) {
+        final TypeBuilder declaringType,
+        final MethodHandles.Lookup packageAccess) {
 
-        VerifyArgument.notNullOrWhitespace(fullName, "fullName");
+        VerifyArgument.notNullOrWhitespace(typeName, "typeName");
 
-        if (fullName.length() > 1023) {
+        if (typeName.length() > 1023) {
             throw Error.typeNameTooLong();
         }
 
-        _fullName = fullName;
-        _internalName = fullName.replace('.', '/');
+        _packageAccess = packageAccess != null ? packageAccess : defaultPackageAccess();
+
+        if (_packageAccess == MethodHandles.publicLookup()) {
+            throw Error.packageAccessRequired();
+        }
+
+        _package = _packageAccess.lookupClass().getPackage();
+
+        final int lastDotIndex = typeName.lastIndexOf('.');
+
+        if (lastDotIndex == -1 || lastDotIndex == 0) {
+            _name = typeName;
+        }
+        else {
+            _name = typeName.substring(lastDotIndex + 1);
+        }
+
+        _fullName = _package.getName() + '.' + _name;
+        _internalName = _fullName.replace('.', '/');
         _isGenericTypeDefinition = false;
         _isGenericParameter = false;
         _hasBeenCreated = false;
         _declaringType = declaringType;
-
-        final int lastDotIndex = fullName.lastIndexOf('.');
-
-        if (lastDotIndex == -1 || lastDotIndex == 0) {
-            _package = Package.getPackage(StringUtilities.EMPTY);
-            _name = _fullName;
-        }
-        else {
-            _package = Package.getPackage(fullName.substring(0, lastDotIndex));
-            _name = fullName.substring(lastDotIndex + 1);
-        }
 
         if (Modifier.isInterface(modifiers)) {
             _modifiers = modifiers & (Modifier.interfaceModifiers() | Modifier.INTERFACE) | Modifier.ABSTRACT;
@@ -1231,14 +1281,18 @@ public final class TypeBuilder<T> extends Type<T> {
 
             _hasBeenCreated = true;
 
-            _generatedClass = (Class<T>) getUnsafeInstance().defineClass(
-                fullName,
-                classBytes,
-                0,
-                classBytes.length,
-                Thread.currentThread().getContextClassLoader(),
-                _protectionDomain
-            );
+            final Unsafe unsafe = getUnsafeInstance();
+
+            final MethodHandle defineClass = defineClass();
+
+            _generatedClass = (Class<T>) defineClass.invokeExact((Object) unsafe,
+                                                                 (MethodHandles.Lookup) _packageAccess,
+                                                                 (String) fullName,
+                                                                 (byte[]) classBytes,
+                                                                 (int) 0,
+                                                                 (int) classBytes.length,
+                                                                 (ClassLoader) Thread.currentThread().getContextClassLoader(),
+                                                                 (ProtectionDomain) _protectionDomain);
 
             RuntimeHelpers.ensureClassInitialized(_generatedClass);
 
@@ -1500,4 +1554,96 @@ public final class TypeBuilder<T> extends Type<T> {
     }
 
     // </editor-fold>
+
+    private static MethodHandle _defineClass;
+
+    private static MethodHandle defineClass() {
+        MethodHandle defineClass = _defineClass;
+
+        if (defineClass == null) {
+            _defineClass = defineClass = defineClass0();
+        }
+
+        return defineClass;
+    }
+
+    private static MethodHandle defineClass0() {
+        try {
+            return unsafeDefineClass0();
+        }
+        catch (final ReflectiveOperationException ignored) {
+            return mhLookupDefineClass0();
+        }
+    }
+
+    private static MethodHandle mhLookupDefineClass0() {
+        try {
+            final MethodHandle d = MethodHandles.lookup()
+                                                .findVirtual(MethodHandles.Lookup.class,
+                                                             "defineClass",
+                                                             MethodType.methodType(Class.class, byte[].class));
+
+            final MethodHandle p = MethodHandles.permuteArguments(d,
+                                                                  MethodType.methodType(Class.class,
+                                                                                        Object.class,
+                                                                                        MethodHandles.Lookup.class,
+                                                                                        String.class,
+                                                                                        byte[].class,
+                                                                                        int.class,
+                                                                                        int.class,
+                                                                                        ClassLoader.class,
+                                                                                        ProtectionDomain.class),
+                                                                  1,
+                                                                  3);
+
+            return p;
+        }
+        catch (final ReflectiveOperationException e) {
+            throw new IllegalStateException("Could not resolve `MethodHandles.Lookup.defineClass(byte[])`.", e);
+        }
+    }
+
+    private static MethodHandle unsafeDefineClass0() throws ReflectiveOperationException {
+        final Object unsafe = getUnsafeInstance();
+
+        @SuppressWarnings("JavaLangInvokeHandleSignature")
+        final MethodHandle d =
+            MethodHandles.lookup().findVirtual(unsafe.getClass(),
+                                               "defineClass",
+                                               MethodType.methodType(Class.class,
+                                                                     String.class,
+                                                                     byte[].class,
+                                                                     int.class,
+                                                                     int.class,
+                                                                     ClassLoader.class,
+                                                                     ProtectionDomain.class))
+                         .asType(MethodType.methodType(Class.class,
+                                                       Object.class,
+                                                       String.class,
+                                                       byte[].class,
+                                                       int.class,
+                                                       int.class,
+                                                       ClassLoader.class,
+                                                       ProtectionDomain.class));
+
+        final MethodHandle p = MethodHandles.permuteArguments(d,
+                                                              MethodType.methodType(Class.class,
+                                                                                    Object.class,
+                                                                                    MethodHandles.Lookup.class,
+                                                                                    String.class,
+                                                                                    byte[].class,
+                                                                                    int.class,
+                                                                                    int.class,
+                                                                                    ClassLoader.class,
+                                                                                    ProtectionDomain.class),
+                                                              0,
+                                                              2,
+                                                              3,
+                                                              4,
+                                                              5,
+                                                              6,
+                                                              7);
+
+        return p;
+    }
 }
