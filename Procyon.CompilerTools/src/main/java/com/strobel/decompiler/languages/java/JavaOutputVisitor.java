@@ -18,6 +18,7 @@ package com.strobel.decompiler.languages.java;
 
 import com.strobel.assembler.ir.attributes.AttributeNames;
 import com.strobel.assembler.ir.attributes.LineNumberTableAttribute;
+import com.strobel.assembler.ir.attributes.ModuleAttribute;
 import com.strobel.assembler.ir.attributes.SourceAttribute;
 import com.strobel.assembler.metadata.FieldDefinition;
 import com.strobel.assembler.metadata.Flags;
@@ -31,6 +32,7 @@ import com.strobel.core.StringUtilities;
 import com.strobel.core.VerifyArgument;
 import com.strobel.decompiler.DecompilerSettings;
 import com.strobel.decompiler.ITextOutput;
+import com.strobel.decompiler.languages.BytecodeLanguage;
 import com.strobel.decompiler.languages.LineNumberPosition;
 import com.strobel.decompiler.languages.TextLocation;
 import com.strobel.decompiler.languages.java.TextOutputFormatter.LineNumberMode;
@@ -201,7 +203,7 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
         writeSpecialsUpToRole(Roles.LEFT_BRACE);
 
         space(
-            (style == BraceStyle.EndOfLine || style == BraceStyle.BannerStyle) &&
+            (style == BraceStyle.EndOfLine || style == BraceStyle.BannerStyle || style == BraceStyle.DoNotChange) &&
             lastWritten != LastWritten.Whitespace && lastWritten != LastWritten.LeftParenthesis
         );
 
@@ -1470,6 +1472,7 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
         final TypeDeclaration type = parent instanceof TypeDeclaration ? (TypeDeclaration) parent : null;
 
         final MethodDefinition constructor = node.getUserData(Keys.METHOD_DEFINITION);
+        final TypeDefinition declaringType = constructor.getDeclaringType();
 
         final LineNumberTableAttribute lineNumberTable = SourceAttribute.find(
             AttributeNames.LineNumberTable,
@@ -1485,7 +1488,10 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
         writeIdentifier(node.getNameToken(), type != null ? type.getName() : node.getName());
         endNode(node.getNameToken());
         space(policy.SpaceBeforeConstructorDeclarationParentheses);
-        writeCommaSeparatedListInParenthesis(node.getParameters(), policy.SpaceWithinMethodDeclarationParentheses);
+
+        if (constructor == null || declaringType == null || !declaringType.isRecord() || !node.getParameters().isEmpty()) {
+            writeCommaSeparatedListInParenthesis(node.getParameters(), policy.SpaceWithinMethodDeclarationParentheses);
+        }
 
         final AstNodeCollection<AstType> thrownTypes = node.getThrownTypes();
 
@@ -1581,13 +1587,18 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
                                          type.isAnonymous() &&
                                          node.getParent() instanceof AnonymousObjectCreationExpression;
 
+        final ClassType classType = node.getClassType();
+
         if (!isTrulyAnonymous) {
             writeAnnotations(node.getAnnotations(), true);
             writeModifiers(node.getModifiers());
 
-            switch (node.getClassType()) {
+            switch (classType) {
                 case ENUM:
                     writeKeyword(Roles.ENUM_KEYWORD);
+                    break;
+                case RECORD:
+                    writeKeyword(Roles.RECORD_KEYWORD);
                     break;
                 case INTERFACE:
                     writeKeyword(Roles.INTERFACE_KEYWORD);
@@ -1603,6 +1614,11 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
             node.getNameToken().acceptVisitor(this, ignored);
             writeTypeParameters(node.getTypeParameters());
 
+            if (classType == ClassType.RECORD) {
+                writeCommaSeparatedListInParenthesis(node.getChildrenByRole(EntityDeclaration.RECORD_COMPONENT),
+                                                     policy.SpaceWithinRecordDeclarationParentheses);
+            }
+
             if (!node.getBaseType().isNull()) {
                 space();
                 writeKeyword(Roles.EXTENDS_KEYWORD);
@@ -1613,7 +1629,7 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
             if (any(node.getInterfaces())) {
                 final Collection<AstType> interfaceTypes;
 
-                if (node.getClassType() == ClassType.ANNOTATION) {
+                if (classType == ClassType.ANNOTATION) {
                     interfaceTypes = new ArrayList<>();
 
                     for (final AstType t : node.getInterfaces()) {
@@ -1633,7 +1649,7 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
                 if (any(interfaceTypes)) {
                     space();
 
-                    if (node.getClassType() == ClassType.INTERFACE || node.getClassType() == ClassType.ANNOTATION) {
+                    if (classType == ClassType.INTERFACE || classType == ClassType.ANNOTATION) {
                         writeKeyword(Roles.EXTENDS_KEYWORD);
                     }
                     else {
@@ -1646,12 +1662,23 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
             }
         }
 
+        if (classType == ClassType.RECORD && node.getMembers().isEmpty()) {
+            openBrace(BraceStyle.BannerStyle);
+            closeBrace(BraceStyle.BannerStyle);
+            endNode(node);
+            newLine();
+            return null;
+        }
+
         final BraceStyle braceStyle;
         final AstNodeCollection<EntityDeclaration> members = node.getMembers();
 
-        switch (node.getClassType()) {
+        switch (classType) {
             case ENUM:
                 braceStyle = policy.EnumBraceStyle;
+                break;
+            case RECORD:
+                braceStyle = policy.RecordBraceStyle;
                 break;
             case INTERFACE:
                 braceStyle = policy.InterfaceBraceStyle;
@@ -1704,6 +1731,25 @@ public final class JavaOutputVisitor implements IAstVisitor<Void, Void> {
         }
 
         endNode(node);
+        return null;
+    }
+
+    @Override
+    public Void visitModuleDeclaration(final ModuleDeclaration node, final Void ignored) {
+        startNode(node);
+
+        final TypeDefinition type = node.getUserData(Keys.TYPE_DEFINITION);
+        final ModuleAttribute attribute = SourceAttribute.find(AttributeNames.Module, type.getSourceAttributes());
+        final BraceStyle braceStyle = policy.ModuleBraceStyle;
+
+        writeKeyword(Roles.MODULE_KEYWORD);
+        node.getNameToken().acceptVisitor(this, ignored);
+        openBrace(braceStyle);
+
+        BytecodeLanguage.writeModuleBody(output, attribute, true);
+
+        closeBrace(braceStyle);
+        newLine();
         return null;
     }
 

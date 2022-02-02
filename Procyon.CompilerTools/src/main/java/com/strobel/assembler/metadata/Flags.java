@@ -166,6 +166,45 @@ public class Flags {
     public static EnumSet<Flag> asFlagSet(final long mask, final Kind kind) {
         final EnumSet<Flag> flags = EnumSet.noneOf(Flag.class);
 
+        if (kind == Kind.Module) {
+            if ((mask & ACC_OPEN) != 0) {
+                flags.add(Flag.OPEN);
+            }
+            if ((mask & ACC_SYNTHETIC) != 0) {
+                flags.add(Flag.SYNTHETIC);
+            }
+            if ((mask & ACC_MANDATED) != 0) {
+                flags.add(Flag.MANDATED);
+            }
+            return flags;
+        }
+
+        if (kind == Kind.Requires) {
+            if ((mask & ACC_TRANSITIVE) != 0) {
+                flags.add(Flag.TRANSITIVE);
+            }
+            if ((mask & ACC_STATIC_PHASE) != 0) {
+                flags.add(Flag.STATIC_PHASE);
+            }
+            if ((mask & ACC_SYNTHETIC) != 0) {
+                flags.add(Flag.SYNTHETIC);
+            }
+            if ((mask & ACC_MANDATED) != 0) {
+                flags.add(Flag.MANDATED);
+            }
+            return flags;
+        }
+
+        if (kind == Kind.ExportsOpens) {
+            if ((mask & ACC_SYNTHETIC) != 0) {
+                flags.add(Flag.SYNTHETIC);
+            }
+            if ((mask & ACC_MANDATED) != 0) {
+                flags.add(Flag.MANDATED);
+            }
+            return flags;
+        }
+
         if ((mask & PUBLIC) != 0) {
             flags.add(Flag.PUBLIC);
         }
@@ -267,7 +306,10 @@ public class Flags {
         Class,
         InnerClass,
         Field,
-        Method
+        Method,
+        Module,
+        Requires,
+        ExportsOpens
     }
 
     /*
@@ -306,15 +348,24 @@ public class Flags {
     public static final int MANDATED = 1 << 15;
 
     public static final int StandardFlags = 0x0fff;
-    public static final int ModifierFlags = StandardFlags & ~INTERFACE;
 
     // Because the following access flags are overloaded with other
     // bit positions, we translate them when reading and writing class
     // files into unique bits positions: ACC_SYNTHETIC <-> SYNTHETIC,
     // for example.
-    public static final int ACC_SUPER     = 0x0020;
-    public static final int ACC_BRIDGE    = 0x0040;
-    public static final int ACC_VARARGS   = 0x0080;
+    public static final int ACC_FINAL        = 0x0010;
+    public static final int ACC_SUPER        = 0x0020;
+    public static final int ACC_BRIDGE       = 0x0040;
+    public static final int ACC_VARARGS      = 0x0080;
+    public static final int ACC_MODULE       = 0x8000;
+
+    public static final int ACC_OPEN         = 0x0020;
+    public static final int ACC_SYNTHETIC    = 0x1000;
+    public static final int ACC_MANDATED     = 0x8000;
+
+    public static final int ACC_TRANSITIVE   = 0x0020;
+    public static final int ACC_STATIC_PHASE = 0x0040;
+
 
     /*****************************************
      * Internal compiler flags (no bits in the lower 16).
@@ -489,22 +540,75 @@ public class Flags {
     public static final long DEOBFUSCATED = 1L << 47;
 
     /**
+     * Flag to indicate class symbol is for module-info
+     */
+    public static final long MODULE = 1L<<51;
+
+    /**
+     * Flag to indicate that a class is a record. The flag is also used to mark fields that are
+     * part of the state vector of a record and to mark the canonical constructor
+     */
+    public static final long RECORD = 1L << 61; // ClassSymbols, MethodSymbols and VarSymbols
+
+    /**
+     * Flag to mark a record constructor as a compact one
+     */
+    public static final long COMPACT_RECORD_CONSTRUCTOR = 1L << 51; // MethodSymbols only
+
+    /**
+     * Flag to mark a record field that was not initialized in the compact constructor
+     */
+    public static final long UNINITIALIZED_FIELD = 1L << 51; // VarSymbols only
+
+    /**
+     * Flag is set for compiler-generated record members, it could be applied to
+     * accessors and fields
+     */
+    public static final int GENERATED_MEMBER = 1 << 24; // MethodSymbols and VarSymbols
+
+    /**
+     * Flag to indicate sealed class/interface declaration.
+     */
+    public static final long SEALED = 1L << 62; // ClassSymbols
+
+    /**
+     * Flag to indicate that the class/interface was declared with the non-sealed modifier.
+     */
+    public static final long NON_SEALED = 1L << 63; // ClassSymbols
+
+    /**
      * Modifier masks.
      */
     public static final int
-        AccessFlags          = PUBLIC | PROTECTED | PRIVATE,
-        LocalClassFlags      = FINAL | ABSTRACT | STRICTFP | ENUM | SYNTHETIC,
-        MemberClassFlags     = LocalClassFlags | INTERFACE | AccessFlags,
-        ClassFlags           = LocalClassFlags | INTERFACE | PUBLIC | ANNOTATION,
-        InterfaceVarFlags    = FINAL | STATIC | PUBLIC,
-        VarFlags             = AccessFlags | FINAL | STATIC |
-                               VOLATILE | TRANSIENT | ENUM,
-        ConstructorFlags     = AccessFlags,
-        InterfaceMethodFlags = ABSTRACT | PUBLIC,
-        MethodFlags          = AccessFlags | ABSTRACT | STATIC | NATIVE |
-                               SYNCHRONIZED | FINAL | STRICTFP;
+        ModuleFlags                       = ACC_OPEN | ACC_SYNTHETIC | ACC_MANDATED,
+        RequiresFlags                     = ACC_TRANSITIVE | ACC_STATIC_PHASE | ACC_SYNTHETIC | ACC_MANDATED,
+        ExportsOpensFlags                 = ACC_SYNTHETIC | ACC_MANDATED,
+        AccessFlags                       = PUBLIC | PROTECTED | PRIVATE,
+        LocalClassFlags                   = FINAL | ABSTRACT | STRICTFP | ENUM | SYNTHETIC,
+        StaticLocalFlags                  = LocalClassFlags | STATIC | INTERFACE,
+        MemberClassFlags                  = LocalClassFlags | INTERFACE | AccessFlags,
+        MemberStaticClassFlags            = MemberClassFlags | STATIC,
+        ClassFlags                        = LocalClassFlags | INTERFACE | PUBLIC | ANNOTATION,
+        InterfaceVarFlags                 = FINAL | STATIC | PUBLIC,
+        VarFlags                          = AccessFlags | FINAL | STATIC |
+                                            VOLATILE | TRANSIENT | ENUM,
+        ConstructorFlags                  = AccessFlags,
+        InterfaceMethodFlags              = ABSTRACT | PUBLIC,
+        MethodFlags                       = AccessFlags | ABSTRACT | STATIC | NATIVE |
+                                            SYNCHRONIZED | FINAL | STRICTFP,
+        RecordMethodFlags                 = AccessFlags | ABSTRACT | STATIC |
+                                            SYNCHRONIZED | FINAL | STRICTFP;
+    public static final long
+        ExtendedStandardFlags             = (long)StandardFlags | DEFAULT | SEALED | NON_SEALED,
+        ExtendedMemberClassFlags          = (long)MemberClassFlags | SEALED | NON_SEALED,
+        ExtendedMemberStaticClassFlags    = (long) MemberStaticClassFlags | SEALED | NON_SEALED,
+        ExtendedClassFlags                = (long)ClassFlags | SEALED | NON_SEALED,
+        ModifierFlags                     = ((long)StandardFlags & ~INTERFACE) | DEFAULT | SEALED | NON_SEALED,
+        InterfaceMethodMask               = ABSTRACT | PRIVATE | STATIC | PUBLIC | STRICTFP | DEFAULT,
+        AnnotationTypeElementMask         = ABSTRACT | PUBLIC,
+        LocalVarFlags                     = FINAL | PARAMETER,
+        ReceiverParamFlags                = PARAMETER;
 
-    public static final long LocalVarFlags = FINAL | PARAMETER;
 
     public static Set<Modifier> asModifierSet(final long flags) {
         Set<Modifier> modifiers = modifierSets.get(flags);
@@ -552,7 +656,7 @@ public class Flags {
 
         return modifiers;
     }
-    
+
     public static int toModifiers(final long flags) {
         int modifiers = 0;
 
@@ -668,7 +772,10 @@ public class Flags {
         ACYCLIC("acyclic"),
         PARAMETER("parameter"),
         VARARGS("varargs"),
-        PACKAGE("package");
+        PACKAGE("package"),
+        OPEN("open"),
+        TRANSITIVE("transitive"),
+        STATIC_PHASE("static");
 
         public final String name;
 
