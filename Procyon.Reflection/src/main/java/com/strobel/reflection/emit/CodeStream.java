@@ -263,7 +263,7 @@ public final class CodeStream {
     /**
      * Puts an array of bytes into this byte stream. The byte stream is
      * automatically enlarged if necessary.
-     * @param b      an array of bytes. May be <tt>null</tt> to put <tt>length</tt>
+     * @param b      an array of bytes. May be null to put length
      *               null bytes into this byte stream.
      * @param offset index of the fist byte of b that must be copied.
      * @param length number of bytes of b that must be copied.
