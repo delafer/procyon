@@ -5,7 +5,9 @@ import com.strobel.assembler.ir.attributes.AttributeNames;
 import com.strobel.assembler.ir.attributes.RecordAttribute;
 import com.strobel.assembler.ir.attributes.RecordComponentInfo;
 import com.strobel.assembler.ir.attributes.SourceAttribute;
+import com.strobel.assembler.metadata.CommonTypeReferences;
 import com.strobel.assembler.metadata.DynamicCallSite;
+import com.strobel.assembler.metadata.LanguageFeature;
 import com.strobel.assembler.metadata.MetadataHelper;
 import com.strobel.assembler.metadata.MethodDefinition;
 import com.strobel.assembler.metadata.TypeDefinition;
@@ -14,17 +16,15 @@ import com.strobel.core.StringUtilities;
 import com.strobel.core.StrongBox;
 import com.strobel.core.VerifyArgument;
 import com.strobel.decompiler.DecompilerContext;
+import com.strobel.decompiler.ast.AstCode;
 import com.strobel.decompiler.languages.java.ast.*;
-import com.strobel.decompiler.patterns.AnyNode;
-import com.strobel.decompiler.patterns.Match;
-import com.strobel.decompiler.patterns.NamedNode;
-import com.strobel.decompiler.patterns.ParameterReferenceNode;
-import com.strobel.decompiler.patterns.Pattern;
-import com.strobel.decompiler.patterns.Repeat;
+import com.strobel.decompiler.patterns.*;
 
+import javax.lang.model.element.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +38,7 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
             new NamedNode(
                 "invocation",
                 new InvocationExpression(
-                    new IdentifierExpression(Expression.MYSTERY_OFFSET, "invokedynamic"),
+                    new InlinedBytecodeExpression(AstCode.InvokeDynamic, new TypedNode(BytecodeConstant.class).toExpression()),
                     new Repeat(new AnyNode()).toExpression()
                 )
             ).toExpression()
@@ -67,6 +67,16 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
             )
         );
 
+    protected final static ExpressionStatement THIS_CONSTRUCTOR_CALL =
+        new ExpressionStatement(
+            new InvocationExpression(
+                new ThisReferenceExpression(Expression.MYSTERY_OFFSET),
+                new Repeat(new AnyNode()).toExpression()
+            )
+        );
+
+    protected final static MethodDeclaration ACCESSOR;
+
     static {
         final HashMap<String, String> generatedMethodNames = new HashMap<>();
 
@@ -75,12 +85,38 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
         generatedMethodNames.put("equals", "(Ljava/lang/Object;)Z");
 
         GENERATED_METHOD_SIGNATURES = Collections.unmodifiableMap(generatedMethodNames);
+
+        final MethodDeclaration accessor = new MethodDeclaration();
+
+        accessor.setName(Pattern.ANY_STRING);
+        accessor.addModifier(Modifier.PUBLIC);
+        accessor.setReturnType(new AnyNode().toType());
+
+        accessor.setBody(
+            new BlockStatement(
+                new ReturnStatement(
+                    new AllMatch(
+                        new MemberReferenceExpression(new ThisReferenceExpression(), Pattern.ANY_STRING),
+                        new IdentifierBackReference("accessor")
+                    ).toExpression()
+                )
+            )
+        );
+
+        ACCESSOR = new NamedNode("accessor", accessor).toMethodDeclaration();
     }
 
     private RecordState _currentRecord;
 
     public RewriteRecordClassesTransform(final DecompilerContext context) {
         super(context);
+    }
+
+    @Override
+    public void run(final AstNode compilationUnit) {
+        if (context.isSupported(LanguageFeature.RECORD_CLASSES)) {
+            super.run(compilationUnit);
+        }
     }
 
     @Override
@@ -131,18 +167,20 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
 
             final DynamicCallSite callSite = first(indyMatch.<InvocationExpression>get("invocation")).getUserData(Keys.DYNAMIC_CALL_SITE);
 
-            if (callSite != null && "java/lang/runtime/ObjectMethods".equals(callSite.getBootstrapMethod().getDeclaringType().getInternalName())) {
+            if (callSite != null && CommonTypeReferences.ObjectMethods.isEquivalentTo(callSite.getBootstrapMethod().getDeclaringType())) {
                 recordState.removableMethods.add(node);
                 return null;
             }
         }
 
-        final RecordComponentInfo componentInfo = recordState.recordComponents.get(node.getName());
+        if (ACCESSOR.matches(node)) {
+            final RecordComponentInfo componentInfo = recordState.recordComponents.get(node.getName());
 
-        if (componentInfo != null &&
-            MetadataHelper.isSameType(componentInfo.getType(), node.getReturnType().toTypeReference())) {
+            if (componentInfo != null &&
+                MetadataHelper.isSameType(componentInfo.getType(), node.getReturnType().toTypeReference())) {
 
-            recordState.removableAccessors.put(componentInfo, node);
+                recordState.removableAccessors.put(componentInfo, node);
+            }
         }
 
         return null;
@@ -201,12 +239,17 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
         final RecordState recordState = _currentRecord;
         final RecordState.Constructor recordConstructor = recordState != null ? recordState.currentConstructor : null;
 
-        if (recordConstructor == null) {
+        if (recordConstructor == null || !recordState.constructors.containsKey(recordConstructor.constructor)) {
             return null;
         }
 
         if (SUPER_CONSTRUCTOR_CALL.matches(node)) {
             recordConstructor.removableSuperCall.set(node);
+            return null;
+        }
+
+        if (THIS_CONSTRUCTOR_CALL.matches(node)) {
+            recordState.constructors.remove(recordConstructor.constructor);
             return null;
         }
 
@@ -264,7 +307,7 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
             this.removableFields = new HashMap<>();
             this.removableMethods = new ArrayList<>();
 
-            final Map<String, RecordComponentInfo> recordComponents = new HashMap<>();
+            final Map<String, RecordComponentInfo> recordComponents = new LinkedHashMap<>();
 
             for (final RecordComponentInfo component : recordAttribute.getComponents()) {
                 recordComponents.put(component.getName(), component);
@@ -286,28 +329,10 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
             final List<RecordComponentInfo> components = recordAttribute.getComponents();
             final int componentCount = components.size();
 
-            final Constructor constructor;
-
-            if (removableAccessors.size() != componentCount ||
-                removableFields.size() != componentCount ||
-                constructors.size() != 1 ||
-                (constructor = single(constructors.values())).removableParameters.size() != componentCount ||
-                constructor.removableAssignments.size() != componentCount ||
-                constructor.removableSuperCall.get() == null) {
-
-                return false;
-            }
-
-            for (final RecordComponentInfo component : components) {
-                if (!removableAccessors.containsKey(component) ||
-                    !constructor.removableAssignments.containsKey(component) ||
-                    !constructor.removableParameters.containsKey(component)) {
-
-                    return false;
-                }
-            }
-
-            return true;
+            return removableAccessors.size() <= componentCount &&
+                   removableFields.size() == componentCount &&
+                   constructors.size() == 1 &&
+                   single(constructors.values()).removableSuperCall.get() != null;
         }
 
         private void rewrite0() {
@@ -326,13 +351,29 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
                 superCall.remove();
             }
 
-            for (final ExpressionStatement assignment : constructor.removableAssignments.values()) {
-                assignment.remove();
+            if (constructor.removableParameters.size() == recordComponents.size() &&
+                constructor.removableAssignments.size() == recordComponents.size()) {
+
+                for (final ExpressionStatement assignment : constructor.removableAssignments.values()) {
+                    assignment.remove();
+                }
+
+                for (final ParameterDeclaration p : constructor.removableParameters.values()) {
+                    p.remove();
+                    p.getModifiers().clear();
+                }
             }
 
-            for (final ParameterDeclaration p : constructor.removableParameters.values()) {
-                p.remove();
-                p.getModifiers().clear();
+            final boolean generatedConstructor = constructor.removableParameters.size() == recordComponents.size();
+
+            for (final RecordComponentInfo component : recordComponents.values()) {
+                ParameterDeclaration p = generatedConstructor ? constructor.removableParameters.get(component) : null;
+
+                if (p == null) {
+                    final FieldDeclaration f = removableFields.get(component);
+                    p = new ParameterDeclaration(f.getName(), f.getReturnType().clone());
+                }
+
                 recordDeclaration.addChild(p, EntityDeclaration.RECORD_COMPONENT);
             }
 
@@ -344,8 +385,21 @@ public class RewriteRecordClassesTransform extends ContextTrackingVisitor<Void> 
                 accessor.remove();
             }
 
-            for (final FieldDeclaration field : removableFields.values()) {
+            for (final Map.Entry<RecordComponentInfo, FieldDeclaration> entry : removableFields.entrySet()) {
+                final FieldDeclaration field = entry.getValue();
+
                 field.remove();
+
+                final ParameterDeclaration parameter = constructor.removableParameters.get(entry.getKey());
+
+                if (parameter != null) {
+                    for (final Annotation annotation : field.getChildrenByRole(Roles.ANNOTATION)) {
+                        if (!parameter.getChildrenByRole(Roles.ANNOTATION).anyMatch(annotation)) {
+                            annotation.remove();
+                            parameter.addChild(annotation, Roles.ANNOTATION);
+                        }
+                    }
+                }
             }
 
             final ConstructorDeclaration constructorDeclaration = single(constructors.keySet());

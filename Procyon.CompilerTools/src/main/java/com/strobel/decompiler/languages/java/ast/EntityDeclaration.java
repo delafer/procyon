@@ -16,7 +16,6 @@
 
 package com.strobel.decompiler.languages.java.ast;
 
-import com.strobel.core.VerifyArgument;
 import com.strobel.decompiler.languages.EntityType;
 import com.strobel.decompiler.languages.TextLocation;
 import com.strobel.decompiler.patterns.Match;
@@ -120,6 +119,18 @@ public abstract class EntityDeclaration extends AstNode {
                getAnnotations().matches(other.getAnnotations(), match);
     }
 
+    public final void addModifier(final Modifier modifier) {
+        EntityDeclaration.addModifier(this, modifier);
+    }
+
+    public final void removeModifier(final Modifier modifier) {
+        EntityDeclaration.removeModifier(this, modifier);
+    }
+
+    public final void setModifiers(final List<Modifier> modifiers) {
+        EntityDeclaration.setModifiers(this, modifiers);
+    }
+
     static List<Modifier> getModifiers(final AstNode node) {
         List<Modifier> modifiers = null;
 
@@ -155,6 +166,7 @@ public abstract class EntityDeclaration extends AstNode {
         node.addChild(new JavaModifierToken(TextLocation.EMPTY, modifier), MODIFIER_ROLE);
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     static boolean removeModifier(final AstNode node, final Modifier modifier) {
         final AstNodeCollection<JavaModifierToken> modifierTokens = node.getChildrenByRole(MODIFIER_ROLE);
 

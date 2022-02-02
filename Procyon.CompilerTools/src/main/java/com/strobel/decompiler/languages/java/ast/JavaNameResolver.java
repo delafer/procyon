@@ -483,6 +483,16 @@ public final class JavaNameResolver {
         }
 
         @Override
+        public Set<Object> visitSwitchExpression(final SwitchExpression node, final String data) {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public Set<Object> visitSwitchExpressionArm(final SwitchExpressionArm node, final String data) {
+            return Collections.emptySet();
+        }
+
+        @Override
         public Set<Object> visitCaseLabel(final CaseLabel node, final String name) {
             return Collections.emptySet();
         }
@@ -556,6 +566,16 @@ public final class JavaNameResolver {
             if (StringUtilities.equals(node.getIdentifier(), name)) {
                 return Collections.<Object>singleton(node.toTypeReference());
             }
+            return Collections.emptySet();
+        }
+
+        @Override
+        public Set<Object> visitIntersectionType(final IntersectionType node, final String data) {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public Set<Object> visitUnionType(final UnionType node, final String data) {
             return Collections.emptySet();
         }
 
@@ -737,6 +757,16 @@ public final class JavaNameResolver {
         }
 
         @Override
+        public Set<Object> visitInlinedBytecode(final InlinedBytecodeExpression node, final String data) {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public Set<Object> visitBytecodeConstant(final BytecodeConstant node, final String data) {
+            return Collections.emptySet();
+        }
+
+        @Override
         public Set<Object> visitCompilationUnit(final CompilationUnit node, final String name) {
             Set<Object> results = null;
 
@@ -812,6 +842,13 @@ public final class JavaNameResolver {
 
         @Override
         public Set<Object> visitInstanceOfExpression(final InstanceOfExpression node, final String name) {
+            if (_mode == NameResolveMode.EXPRESSION && StringUtilities.equals(node.getIdentifier().getName(), name)) {
+                final Variable variable = node.getUserData(Keys.VARIABLE);
+
+                if (variable != null) {
+                    return Collections.<Object>singleton(variable);
+                }
+            }
             return Collections.emptySet();
         }
 

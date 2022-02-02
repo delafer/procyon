@@ -13,12 +13,13 @@
 
 package com.strobel.decompiler;
 
-import org.junit.Ignore;
+import com.strobel.assembler.metadata.CompilerTarget;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.io.StringWriter;
 
+@SuppressWarnings("ALL")
 public class EnhancedTryTests extends DecompilerTest {
     private static final class A {
         public void test() throws IOException {
@@ -78,7 +79,7 @@ public class EnhancedTryTests extends DecompilerTest {
                 writer1.write("This is only a test.");
                 writer2.write("This is also a test.");
             }
-            catch (Throwable t) {
+            catch (final Throwable t) {
                 t.printStackTrace();
             }
         }
@@ -91,7 +92,7 @@ public class EnhancedTryTests extends DecompilerTest {
                 writer1.write("This is only a test.");
                 writer2.write("This is also a test.");
             }
-            catch (RuntimeException e) {
+            catch (final RuntimeException e) {
                 e.printStackTrace();
             }
         }
@@ -104,7 +105,7 @@ public class EnhancedTryTests extends DecompilerTest {
                     writer1.write("This is only a test.");
                     writer2.write("This is also a test.");
                 }
-                catch (Throwable t) {
+                catch (final Throwable t) {
                     t.printStackTrace();
                 }
             }
@@ -118,7 +119,7 @@ public class EnhancedTryTests extends DecompilerTest {
                     writer1.write("This is only a test.");
                     writer2.write("This is also a test.");
                 }
-                catch (RuntimeException e) {
+                catch (final RuntimeException e) {
                     e.printStackTrace();
                 }
             }
@@ -237,7 +238,7 @@ public class EnhancedTryTests extends DecompilerTest {
             "            writer1.write(\"This is only a test.\");\n" +
             "            writer2.write(\"This is also a test.\");\n" +
             "        }\n" +
-            "        catch (Throwable t) {\n" +
+            "        catch (final Throwable t) {\n" +
             "            t.printStackTrace();\n" +
             "        }\n" +
             "    }\n" +
@@ -257,7 +258,7 @@ public class EnhancedTryTests extends DecompilerTest {
             "            writer1.write(\"This is only a test.\");\n" +
             "            writer2.write(\"This is also a test.\");\n" +
             "        }\n" +
-            "        catch (RuntimeException e) {\n" +
+            "        catch (final RuntimeException e) {\n" +
             "            e.printStackTrace();\n" +
             "        }\n" +
             "    }\n" +
@@ -277,7 +278,7 @@ public class EnhancedTryTests extends DecompilerTest {
             "                writer1.write(\"This is only a test.\");\n" +
             "                writer2.write(\"This is also a test.\");\n" +
             "            }\n" +
-            "            catch (Throwable t) {\n" +
+            "            catch (final Throwable t) {\n" +
             "                t.printStackTrace();\n" +
             "            }\n" +
             "        }\n" +
@@ -298,7 +299,7 @@ public class EnhancedTryTests extends DecompilerTest {
             "                writer1.write(\"This is only a test.\");\n" +
             "                writer2.write(\"This is also a test.\");\n" +
             "            }\n" +
-            "            catch (RuntimeException e) {\n" +
+            "            catch (final RuntimeException e) {\n" +
             "                e.printStackTrace();\n" +
             "            }\n" +
             "        }\n" +
@@ -309,6 +310,9 @@ public class EnhancedTryTests extends DecompilerTest {
 
     @Test
     public void testEnhancedTryEmptyBody() throws Throwable {
+        if (classVersion(J.class).compareTo(CompilerTarget.JDK13) < 0) {
+            return;
+        }
         verifyOutput(
             J.class,
             defaultSettings(),
@@ -323,6 +327,9 @@ public class EnhancedTryTests extends DecompilerTest {
 
     @Test
     public void testEnhancedTryTwoResourcesEmptyBody() throws Throwable {
+        if (classVersion(K.class).compareTo(CompilerTarget.JDK13) < 0) {
+            return;
+        }
         verifyOutput(
             K.class,
             defaultSettings(),

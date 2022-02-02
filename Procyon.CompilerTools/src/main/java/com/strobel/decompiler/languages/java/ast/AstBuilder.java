@@ -22,6 +22,7 @@ import com.strobel.assembler.ir.attributes.LineNumberTableAttribute;
 import com.strobel.assembler.ir.attributes.ModuleAttribute;
 import com.strobel.assembler.ir.attributes.SourceAttribute;
 import com.strobel.assembler.metadata.*;
+import com.strobel.assembler.metadata.UnionType;
 import com.strobel.assembler.metadata.annotations.*;
 import com.strobel.core.ArrayUtilities;
 import com.strobel.core.Closeables;
@@ -44,6 +45,8 @@ import javax.lang.model.element.Modifier;
 import java.lang.ref.Reference;
 import java.lang.ref.SoftReference;
 import java.util.*;
+
+import static com.strobel.core.CollectionUtilities.first;
 
 public final class AstBuilder {
     private final DecompilerContext _context;
@@ -232,6 +235,47 @@ public final class AstBuilder {
     final AstType convertType(final TypeReference type, final MutableInteger typeIndex, final ConvertTypeOptions options) {
         if (type == null) {
             return AstType.NULL;
+        }
+
+        if (type instanceof ICompoundType) {
+            final ICompoundType cType = (ICompoundType) type;
+
+            if (options.getIncludeIntersectionTypes()) {
+                final List<TypeReference> ifReferences = cType.getInterfaces();
+
+                final AstType baseType = cType.getBaseType() == BuiltinTypes.Null ? AstType.NULL
+                                                                                  : convertType(cType.getBaseType(), typeIndex, options);
+                final AstType[] ifTypes = new AstType[ifReferences.size()];
+
+                for (int i = 0; i < ifReferences.size(); i++) {
+                    ifTypes[i] = convertType(ifReferences.get(i), typeIndex, options);
+                }
+
+                final IntersectionType isType = new IntersectionType(baseType, ifTypes);
+                isType.putUserData(Keys.TYPE_REFERENCE, type);
+                return isType;
+            }
+
+            return convertType(cType.getBaseType(), typeIndex, options).makeArrayType();
+        }
+
+        if (type instanceof UnionType) {
+            final UnionType uType = (UnionType) type;
+
+            if (options.getIncludeUnionTypes()) {
+                final List<TypeReference> alternatives = uType.getAlternatives();
+                final AstType[] astAlternatives = new AstType[alternatives.size()];
+
+                for (int i = 0; i < alternatives.size(); i++) {
+                    astAlternatives[i] = convertType(alternatives.get(i), typeIndex, options);
+                }
+
+                final com.strobel.decompiler.languages.java.ast.UnionType isType = new com.strobel.decompiler.languages.java.ast.UnionType(astAlternatives);
+                isType.putUserData(Keys.TYPE_REFERENCE, type);
+                return isType;
+            }
+
+            return convertType(first(uType.getAlternatives()), typeIndex, options).makeArrayType();
         }
 
         if (type.isArray()) {
@@ -423,6 +467,10 @@ public final class AstBuilder {
             }
         }
 
+        if (name == null) {
+            name = nameSource.getSimpleName();
+        }
+
         final SimpleType astType = new SimpleType(name);
 
         astType.putUserData(Keys.TYPE_REFERENCE, type);
@@ -538,7 +586,7 @@ public final class AstBuilder {
         }
 
         for (final TypeReference interfaceType : type.getExplicitInterfaces()) {
-            if (type.isAnnotation() && "java/lang/annotations/Annotation".equals(interfaceType.getInternalName())) {
+            if (type.isAnnotation() && CommonTypeReferences.Annotation.isEquivalentTo(interfaceType)) {
                 continue;
             }
             astType.addChild(convertType(interfaceType), Roles.IMPLEMENTED_INTERFACE);
